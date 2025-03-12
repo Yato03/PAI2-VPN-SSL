@@ -3,12 +3,14 @@ package server;
 import java.io.*;
 import java.net.ServerSocket;
 import java.net.Socket;
-import java.nio.file.Files;
-import java.nio.file.Paths;
-import java.nio.file.StandardOpenOption;
-import java.util.Arrays;
+import java.security.KeyStore;
 
 import criptography.HashUtil;
+import requests.ClientRequest;
+import requests.ServerResponse;
+import requests.User;
+
+import javax.net.ssl.*;
 
 public class Server {
 
@@ -20,125 +22,128 @@ public class Server {
     public static void main(String[] args) throws IOException,
             InterruptedException {
 
-        // perpetually listen for clients
-        ServerSocket serverSocket = new ServerSocket(3343);
+        // Base de datos
+        Database database = new Database();
+        SSLServerSocket serverSocket;
+
+        // Socket con SSL
+        // SSLServerSocketFactory factory = (SSLServerSocketFactory) SSLServerSocketFactory.getDefault();
+        // SSLServerSocket serverSocket = (SSLServerSocket) factory.createServerSocket(3343);
+
+        // Socket sin SSL
+        // ServerSocket serverSocket = new ServerSocket(3343);
+
+        // Obtener las rutas del keystore y truststore desde las propiedades de sistema
+        String keystorePath = System.getProperty("javax.net.ssl.keyStore");
+        String keystorePassword = System.getProperty("javax.net.ssl.keyStorePassword");
+
+        // Verificar si las propiedades fueron cargadas correctamente
+        if (keystorePath == null || keystorePassword == null) {
+            System.out.println("Se requiere el keystore, truststore y sus contraseñas como argumentos de la JVM.");
+            return;
+        }
+
+        try {
+            // Cargar el keystore
+            KeyStore keyStore = KeyStore.getInstance("JKS");
+            try (FileInputStream keyStoreFile = new FileInputStream(keystorePath)) {
+                keyStore.load(keyStoreFile, keystorePassword.toCharArray());
+            }
+
+            // Crear TrustManagerFactory
+            TrustManagerFactory trustManagerFactory = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm());
+            if (keyStore != null) {
+                trustManagerFactory.init(keyStore);
+            } else {
+                trustManagerFactory.init(keyStore); // Si no se ha pasado truststore, usar el keystore como truststore
+            }
+
+            // Crear KeyManagerFactory
+            KeyManagerFactory keyManagerFactory = KeyManagerFactory.getInstance(KeyManagerFactory.getDefaultAlgorithm());
+            keyManagerFactory.init(keyStore, keystorePassword.toCharArray());
+
+            // Crear SSLContext con TLS 1.3
+            SSLContext sslContext = SSLContext.getInstance("TLSv1.3");
+            sslContext.init(keyManagerFactory.getKeyManagers(), trustManagerFactory.getTrustManagers(), null);
+
+            // Crear SSLServerSocketFactory
+            SSLServerSocketFactory factory = sslContext.getServerSocketFactory();
+            serverSocket = (SSLServerSocket) factory.createServerSocket(3343);
+        }
+        catch (Exception e) {
+            e.printStackTrace();
+            return;
+        }
         while (true) {
 
             // wait for client connection and check login information
             try {
                 System.err.println("Waiting for connection...");
 
-                Socket socket = serverSocket.accept();
+                // Cone
+
+                // Socket socket = serverSocket.accept();
+
+                SSLSocket socket = (SSLSocket) serverSocket.accept();
+                System.out.println("Conexión establecida con " + socket.getInetAddress());
+                // Habilitar solo TLS_AES_128_GCM_SHA256
+                String[] enabledCipherSuites = new String[] {
+                        "TLS_AES_128_GCM_SHA256"
+                };
+                socket.setEnabledCipherSuites(enabledCipherSuites);
 
                 // open BufferedReader for reading data from client
                 BufferedReader input = new BufferedReader(new InputStreamReader(socket.getInputStream()));
 
 				// read operation from client
-
-				String operation = input.readLine();
-                System.out.println("Operation: " + operation);
-                String usernameAndPassword = input.readLine();
-                String nonce = input.readLine();
-                String hmac = input.readLine();
+                ClientRequest request = ClientRequest.recieveDataFromServer(input);
 
                 // open PrintWriter for writing data to client
                 PrintWriter output = new PrintWriter(new OutputStreamWriter(socket.getOutputStream()));
 
-                // Check hmac
-                String newHmac = HashUtil.createHmacMessage(nonce+usernameAndPassword);
-                if(!hmac.equals(newHmac)) {
-                    output.println("error");
-                    output.println("El mensaje ha perdido la integridad");
-                    output.close();
-                    input.close();
-                    socket.close();
-                    continue;
-                }
-
-                // Check nonce
-                String archivo = "server/nonces.txt";
-                boolean encontrado = false;
-
-                try (BufferedReader br = new BufferedReader(new FileReader(archivo))) {
-                    String line;
-                    while ((line = br.readLine()) != null) {
-                        if (line.trim().equals(nonce)) {
-                            encontrado = true;
-                            break;
-                        }
-                    }
-                } catch (IOException e) {
-                    System.out.println("Error al leer el archivo: " + e.getMessage());
-                }
-
-                if (encontrado) {
-                    output.println("error");
-                    output.println("El nonce ya ha sido usado");
-                    output.close();
-                    input.close();
-                    socket.close();
-                    continue;
-                }
-
-                Files.write(Paths.get(archivo), (nonce + System.lineSeparator()).getBytes(), StandardOpenOption.APPEND);
-
-                String[] tokens = usernameAndPassword.split(",");
-
-                if (tokens.length != 2) {
-                    output.println("error");
-                    output.println("Falta el usuario o contraseña");
-                    output.close();
-                    input.close();
-                    socket.close();
-                    continue;
-                }
-
-                // Check integrity users.txt
-                if(!HashUtil.checkUsersIntegrity()){
-                    System.out.println("Se ha perdido la integridad en la base de datos");
-                }
+                String[] tokens = request.getMessage().split(",");
 
                 String username = tokens[0];
                 String password = tokens[1];
 
-                String registry = HashUtil.hashPassword(username, password);
-                // Comprobar que el registro no existe en users.txt
-
-                archivo = "server/users.txt";
-                encontrado = false;
-
-                try (BufferedReader br = new BufferedReader(new FileReader(archivo))) {
-                    String line;
-                    while ((line = br.readLine()) != null) {
-                        if (line.trim().equals(registry)) {
-                            encontrado = true;
-                            break;
-                        }
-                    }
-                } catch (IOException e) {
-                    System.out.println("Error al leer el archivo: " + e.getMessage());
+                if (tokens.length != 2) {
+                    ServerResponse.sendDataToClient("error", "Falta el usuario o contraseña", output);
+                    output.close();
+                    input.close();
+                    socket.close();
+                    continue;
                 }
 
-				if(operation.equals("login")) {
+                // Comprobar si el usuario existe
 
-                    if(!encontrado) {
-                        output.println("error");
-                        output.println("El usuario no existe");
+                User user = database.getUserByUsername(tokens[0]);
+
+				if(request.getOperation().equals("login")) {
+
+                    if(user == null) {
+                        ServerResponse.sendDataToClient("error", "El usuario no existe", output);
                         output.close();
                         input.close();
                         socket.close();
                         continue;
                     }
 
-                    output.println("success");
-					output.println("Usuario logueado");
-                    output.flush();
-				}
-				else if(operation.equals("register")) {
+                    boolean loginSucess = database.login(username, password);
 
-                    if(encontrado) {
-                        output.println("error");
-                        output.println("El usuario ya existe");
+                    if(!loginSucess) {
+                        ServerResponse.sendDataToClient("error", "La contraseña es incorrecta", output);
+                        output.close();
+                        input.close();
+                        socket.close();
+                        continue;
+                    }
+
+                    ServerResponse.sendDataToClient("success", "Usuario logueado", String.format("%d", user.getId()),output);
+				}
+				else if(request.getOperation().equals("register")) {
+
+                    if(user != null) {
+                        ServerResponse.sendDataToClient("error", "El usuario ya existe", output);
                         output.close();
                         input.close();
                         socket.close();
@@ -146,93 +151,42 @@ public class Server {
                     }
 
                     // Ingresar usuario en la base de datos
-                    Files.write(Paths.get(archivo), (registry + System.lineSeparator()).getBytes(), StandardOpenOption.APPEND);
+                    boolean success = database.createUser(username, password);
 
-                    HashUtil.saveNewIntegrityValue();
-
-                    output.println("success");
-					output.println("Usuario registrado");
-                    output.flush();
-				}
-				else {
-					output.println("Invalid operation");
-				}
-
-                // read operation from client
-
-                operation = input.readLine();
-                System.out.println("Operation: " + operation);
-                String message = input.readLine();
-                nonce = input.readLine();
-                hmac = input.readLine();
-
-                // Check hmac
-                newHmac = HashUtil.createHmacMessage(nonce+message);
-                if(!hmac.equals(newHmac)) {
-                    output.println("error");
-                    output.println("El mensaje ha perdido la integridad");
-                    output.close();
-                    input.close();
-                    socket.close();
-                    continue;
-                }
-
-                // Check nonce
-                archivo = "server/nonces.txt";
-                encontrado = false;
-
-                try (BufferedReader br = new BufferedReader(new FileReader(archivo))) {
-                    String line;
-                    while ((line = br.readLine()) != null) {
-                        if (line.trim().equals(nonce)) {
-                            encontrado = true;
-                            break;
-                        }
-                    }
-                } catch (IOException e) {
-                    System.out.println("Error al leer el archivo: " + e.getMessage());
-                }
-
-                if (encontrado) {
-                    output.println("error");
-                    output.println("El nonce ya ha sido usado");
-                    output.close();
-                    input.close();
-                    socket.close();
-                    continue;
-                }
-
-                Files.write(Paths.get(archivo), (nonce + System.lineSeparator()).getBytes(), StandardOpenOption.APPEND);
-
-                if(operation.equals("logout")){
-                    output.println("success");
-                    output.println("Usuario ha cerrado sesión");
-                    output.close();
-                    input.close();
-                    socket.close();
-                    continue;
-                }
-                else if(operation.equals("transfer")){
-                    tokens = message.split(", ");
-                    System.out.println(tokens.length);
-                    //String origin = tokens[0];
-                    //String destination = tokens[1];
-                    //String amount = tokens[2];
-
-                    if (tokens.length != 3) {
-                        output.println("error");
-                        output.println("Falta alguno de los valores");
-                        output.flush();
+                    if(!success) {
+                        ServerResponse.sendDataToClient("error", "Ha ocurrido un error al crear el usuario", output);
                         output.close();
                         input.close();
                         socket.close();
                         continue;
                     }
 
-                    output.println("success");
-                    output.println("Transaccion registrada");
-                    System.out.println("Transaccion registrada");
-                    output.flush();
+                    ServerResponse.sendDataToClient("success", "Usuario registrado", output);
+				}
+				else {
+                    ServerResponse.sendDataToClient("error", "Operación invalida", output);
+                }
+
+                // read operation from client
+                request = ClientRequest.recieveDataFromServer(input);
+
+                if(request.getOperation().equals("logout")){
+                    ServerResponse.sendDataToClient("success", "Usuario ha cerrado sesión", output);
+                    output.close();
+                    input.close();
+                    socket.close();
+                    continue;
+                }
+                else if(request.getOperation().equals("message")){
+                    if (request.getMessage().length() > 144) {
+                        ServerResponse.sendDataToClient("error", "El mensaje supera los 144 caracteres", output);
+                        output.close();
+                        input.close();
+                        socket.close();
+                        continue;
+                    }
+                    database.registryMessage(request.getUserId());
+                    ServerResponse.sendDataToClient("success", "Mensaje enviado y recibido correctamente", output);
                 }
 
                 output.close();
@@ -243,6 +197,9 @@ public class Server {
             // handle exception communicating with client
             catch (IOException ioException) {
                 ioException.printStackTrace();
+            }
+            catch (Exception e){
+                e.printStackTrace();
             }
 
         } // end while

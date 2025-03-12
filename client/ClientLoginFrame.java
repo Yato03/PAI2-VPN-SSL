@@ -1,6 +1,7 @@
 package client;
 
 import criptography.HashUtil;
+import requests.ClientRequest;
 
 import javax.swing.*;
 import java.awt.event.ActionEvent;
@@ -19,6 +20,9 @@ public class ClientLoginFrame {
         frame.setSize(300, 250);
         frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
         frame.setLayout(null);
+
+        // Centrar la ventana
+        frame.setLocationRelativeTo(null);
 
         // Campo de usuario
         JLabel userLabel = new JLabel("Usuario:");
@@ -52,15 +56,15 @@ public class ClientLoginFrame {
         loginButton.addActionListener(new ActionListener() {
             public void actionPerformed(ActionEvent e) {
                 String usuario = userField.getText();
-                String contraseña = new String(passwordField.getPassword());
-                String message = String.format(usuario + "," + contraseña);
-                String nonce = HashUtil.createNonce();
-                String hmac = HashUtil.createHmacMessage(nonce+message);
-                output.println("login");
-                output.println(message);
-                output.println(nonce);
-                output.println(hmac);
-                output.flush();
+                String contrasena = new String(passwordField.getPassword());
+                String message = String.format(usuario + "," + contrasena);
+                try {
+                    ClientRequest.sendDataToServer("login", message, output);
+                }
+                catch (Exception ex) {
+                    JOptionPane.showMessageDialog(frame, ex.getMessage(), "Error", JOptionPane.ERROR_MESSAGE);
+                }
+
             }
         });
 
@@ -70,13 +74,12 @@ public class ClientLoginFrame {
                 String usuario = userField.getText();
                 String contraseña = new String(passwordField.getPassword());
                 String message = String.format(usuario + "," + contraseña);
-                String nonce = HashUtil.createNonce();
-                String hmac = HashUtil.createHmacMessage(nonce+message);
-                output.println("register");
-                output.println(message);
-                output.println(nonce);
-                output.println(hmac);
-                output.flush();
+                try {
+                    ClientRequest.sendDataToServer("register", message, output);
+                }
+                catch (Exception ex) {
+                    JOptionPane.showMessageDialog(frame, ex.getMessage(), "Error", JOptionPane.ERROR_MESSAGE);
+                }
             }
         });
 

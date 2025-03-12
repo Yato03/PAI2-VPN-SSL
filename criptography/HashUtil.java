@@ -21,7 +21,7 @@ public class HashUtil {
     private static final String FILE_PATH = "server/users.txt"; // Ruta del archivo a proteger
     private static final String HMAC_FILE = "server/integrity_check.txt"; // Archivo donde se guarda el HMAC
 
-    public static String hashPassword(String usuario, String contraseña) {
+    public static String hashPassword(String contraseña) {
         try {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
             byte[] hashBytes = digest.digest(contraseña.getBytes(StandardCharsets.UTF_8));
@@ -36,7 +36,7 @@ public class HashUtil {
                 hexString.append(hex);
             }
 
-            return usuario + ":" + hexString.toString();
+            return hexString.toString();
         } catch (NoSuchAlgorithmException e) {
             throw new RuntimeException("Error al generar el hash SHA-256", e);
         }
