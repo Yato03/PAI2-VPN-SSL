@@ -13,7 +13,7 @@ public class ConnectionTest {
 
     private static final String SERVER_HOST = "localhost"; // Cambiar por la IP o el servidor que desees probar
     private static final int SERVER_PORT = 3343;
-    private static final int NUM_CLIENTS = 50;
+    private static final int NUM_CLIENTS = 150;
 
     public static void main(String[] args) throws InterruptedException, ExecutionException {
         testSSL();
